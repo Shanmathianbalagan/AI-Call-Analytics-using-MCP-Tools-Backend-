@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mysql-call-analytics": {
+      "command": "C:\\mcp-ai-tool-router\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\mcp-ai-tool-router\\mysql_mcp_server.py"
+      ]
+    }
+  }
+}
