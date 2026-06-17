@@ -2,6 +2,8 @@
 
 FastAPI backend for an AI-powered call analytics chatbot. The backend uses GPT-4o-mini for intent routing and final answer formatting, and uses MCP-style retrieval tools to fetch call analytics data from MySQL.
 
+The project also supports hosted authenticated HTTP access to the existing MCP tools through `hosted_mcp_server.py`.
+
 ## Architecture
 
 ```text
@@ -23,6 +25,7 @@ C:\mcp-ai-tool-router
 |-- ai_bot.py
 |-- api.py
 |-- ai_tool_router.py
+|-- hosted_mcp_server.py
 |-- mysql_mcp_server.py
 |-- requirements.txt
 |-- .env.example
@@ -46,6 +49,11 @@ MYSQL_PORT=3306
 PORT=8001
 
 FRONTEND_ORIGIN=http://localhost:5500
+
+MCP_AUTH_TOKEN=change_this_secret_token
+MCP_HOST=0.0.0.0
+MCP_PORT=8000
+ENVIRONMENT=local
 ```
 
 `FRONTEND_ORIGIN` supports comma-separated values, for example:
@@ -105,6 +113,149 @@ Linux/macOS shell equivalent:
 
 ```bash
 uvicorn ai_bot:app --host 0.0.0.0 --port "$PORT"
+```
+
+## Hosted MCP HTTP Server
+
+Hosted mode exposes the existing MySQL-backed MCP tools through authenticated HTTP endpoints. It does not replace local Claude Desktop MCP mode.
+
+Architecture:
+
+```text
+AI Client / Claude / Chatbot
+Authenticated HTTP Request
+hosted_mcp_server.py
+Whitelisted Tool Router
+Existing MCP Tool Function
+MySQL call_analytics_db.calls
+JSON Tool Result
+AI Response
+```
+
+Start hosted MCP server:
+
+```powershell
+uvicorn hosted_mcp_server:app --host 0.0.0.0 --port 8000
+```
+
+Windows environment port:
+
+```powershell
+uvicorn hosted_mcp_server:app --host 0.0.0.0 --port $env:MCP_PORT
+```
+
+Linux/macOS environment port:
+
+```bash
+uvicorn hosted_mcp_server:app --host 0.0.0.0 --port "$MCP_PORT"
+```
+
+### Render Startup
+
+For Render Web Service deployment, use Render's provided `$PORT`:
+
+```text
+Build Command:
+pip install -r requirements.txt
+
+Start Command:
+uvicorn hosted_mcp_server:app --host 0.0.0.0 --port $PORT
+
+Health Check Path:
+/health
+```
+
+The repository also includes `render.yaml` for Render Blueprint-style setup. Secrets still need to be configured in the Render dashboard.
+
+Required Render environment variables:
+
+```text
+MYSQL_HOST
+MYSQL_USER
+MYSQL_PASSWORD
+MYSQL_DATABASE=call_analytics_db
+MYSQL_PORT=3306
+MCP_AUTH_TOKEN
+ENVIRONMENT=production
+```
+
+Do not set real secrets in `render.yaml`.
+
+Health check:
+
+```http
+GET /health
+```
+
+Expected response:
+
+```json
+{
+  "status": "running",
+  "service": "Hosted MCP Server",
+  "database": "connected"
+}
+```
+
+Authenticated tool endpoint:
+
+```http
+POST /tools/call
+Authorization: Bearer <MCP_AUTH_TOKEN>
+```
+
+Request:
+
+```json
+{
+  "tool_name": "search_mysql_any_value_optimized",
+  "arguments": {
+    "search_value": "iPhone",
+    "limit": 5
+  }
+}
+```
+
+Windows curl:
+
+```powershell
+curl -X POST http://localhost:8000/tools/call ^
+  -H "Authorization: Bearer YOUR_TOKEN" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"tool_name\":\"search_mysql_any_value_optimized\",\"arguments\":{\"search_value\":\"iPhone\",\"limit\":5}}"
+```
+
+Linux/macOS curl:
+
+```bash
+curl -X POST http://localhost:8000/tools/call \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tool_name":"search_mysql_any_value_optimized","arguments":{"search_value":"iPhone","limit":5}}'
+```
+
+Supported hosted tools:
+
+```text
+get_mysql_dataset_summary
+search_mysql_any_value_optimized
+get_mysql_full_call_by_id
+get_mysql_full_call_by_recording_id
+get_all_issue_patterns
+get_improvement_areas
+get_language_distribution
+get_top_products_discussed
+get_repeated_issue_patterns
+```
+
+Security:
+
+```text
+Bearer token is required for /tools/call.
+Only whitelisted tools can run.
+Unknown tools return 400 Bad Request.
+Missing or invalid token returns 401 Unauthorized.
+Secrets are loaded from environment variables.
 ```
 
 ## Health Check
@@ -200,6 +351,8 @@ MYSQL_PORT
 
 If frontend requests are blocked, verify `FRONTEND_ORIGIN` matches the exact frontend URL.
 
+If hosted MCP tool calls return 401, verify `MCP_AUTH_TOKEN` and the `Authorization: Bearer <token>` header.
+
 ## Deployment Checklist
 
 ```text
@@ -213,4 +366,7 @@ If frontend requests are blocked, verify `FRONTEND_ORIGIN` matches the exact fro
 [ ] POST /chat returns chatbot response
 [ ] Frontend origin configured in CORS
 [ ] Sample queries return expected results
+[ ] Hosted MCP /health works
+[ ] Hosted MCP /tools/call rejects missing token
+[ ] Hosted MCP /tools/call works with valid token
 ```
