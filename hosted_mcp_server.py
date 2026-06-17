@@ -1,4 +1,5 @@
 import os
+import secrets
 from typing import Any
 
 import mysql.connector
@@ -22,7 +23,7 @@ from mysql_mcp_server import (
 
 load_dotenv()
 
-MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "").strip()
 
 app = FastAPI(
     title="Hosted MCP Server",
@@ -67,9 +68,19 @@ def verify_bearer_token(authorization: str | None = Header(default=None)) -> Non
             detail="MCP_AUTH_TOKEN is not configured.",
         )
 
-    expected_header = f"Bearer {MCP_AUTH_TOKEN}"
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+        )
 
-    if authorization != expected_header:
+    auth_scheme, separator, provided_token = authorization.strip().partition(" ")
+
+    if (
+        not separator
+        or auth_scheme.lower() != "bearer"
+        or not secrets.compare_digest(provided_token.strip(), MCP_AUTH_TOKEN)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized",
