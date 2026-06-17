@@ -6,6 +6,7 @@ import mysql.connector
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 from mysql_mcp_server import (
@@ -39,6 +40,18 @@ app = FastAPI(
 bearer_scheme = HTTPBearer(
     scheme_name="MCP Bearer Token",
     description="Use the Render MCP_AUTH_TOKEN value as a Bearer token.",
+)
+
+remote_mcp = FastMCP(
+    "Hosted Call Analytics MCP",
+    instructions=(
+        "Use these tools to retrieve call analytics data from the hosted "
+        "MySQL-backed MCP server. Choose one tool based on the user's intent, "
+        "then summarize only the returned tool result."
+    ),
+    streamable_http_path="/",
+    stateless_http=True,
+    json_response=True,
 )
 
 
@@ -332,6 +345,145 @@ ALLOWED_TOOLS = {
 }
 
 
+@remote_mcp.tool()
+def mcp_get_mysql_dataset_summary(
+    limit: int = 3,
+    start_date=None,
+    end_date=None,
+) -> dict:
+    """Use for dataset overview, total records, columns, and sample records."""
+
+    return get_mysql_dataset_summary(
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@remote_mcp.tool()
+def mcp_search_mysql_any_value_optimized(
+    search_value: str,
+    limit: int = 5,
+    start_date=None,
+    end_date=None,
+) -> dict:
+    """Use for keyword/product/language/topic searches across all columns."""
+
+    return search_mysql_any_value_optimized(
+        search_value=search_value,
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_mysql_full_call_by_id(
+    id: int,
+    start_date=None,
+    end_date=None,
+) -> dict:
+    """Use for complete call details by numeric MySQL id."""
+
+    return get_mysql_full_call_by_id(
+        id=id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_mysql_full_call_by_recording_id(
+    recording_id: str,
+    start_date=None,
+    end_date=None,
+) -> dict:
+    """Use for complete call details by recording_id."""
+
+    return get_mysql_full_call_by_recording_id(
+        recording_id=recording_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_all_issue_patterns(
+    start_date=None,
+    end_date=None,
+    limit: int = 10,
+) -> dict:
+    """Use for broad customer issue, complaint, or pain-point analysis."""
+
+    return get_all_issue_patterns(
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_improvement_areas(
+    start_date=None,
+    end_date=None,
+    limit: int = 10,
+) -> dict:
+    """Use for call quality improvement areas and repeated agent weaknesses."""
+
+    return get_improvement_areas(
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_language_distribution(
+    start_date=None,
+    end_date=None,
+    limit: int = 20,
+) -> dict:
+    """Use for calls grouped by language."""
+
+    return get_language_distribution(
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_top_products_discussed(
+    start_date=None,
+    end_date=None,
+    limit: int = 10,
+) -> dict:
+    """Use for most discussed products and product frequency analysis."""
+
+    return get_top_products_discussed(
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+@remote_mcp.tool()
+def mcp_get_repeated_issue_patterns(
+    start_date=None,
+    end_date=None,
+    limit: int = 10,
+    minimum_frequency: int = 3,
+) -> dict:
+    """Use for recurring or high-frequency customer complaints."""
+
+    return get_repeated_issue_patterns(
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        minimum_frequency=minimum_frequency,
+    )
+
+
 def verify_bearer_token(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> None:
@@ -371,9 +523,14 @@ def service_info() -> dict[str, Any]:
         "endpoints": {
             "health": "GET /health",
             "tool_call": "POST /tools/call",
+            "remote_mcp": "https://ai-call-analytics-mcp.onrender.com/mcp",
             "docs": "GET /docs",
         },
         "authentication": "Authorization: Bearer <MCP_AUTH_TOKEN>",
+        "remote_mcp_note": (
+            "Claude custom connectors should use /mcp. The REST endpoint "
+            "/tools/call remains Bearer-token protected."
+        ),
         "supported_tools": TOOL_DESCRIPTIONS,
         "ai_client_instructions_url": "GET /instructions",
     }
@@ -495,5 +652,9 @@ def get_ai_client_instructions(
         "instructions": AI_CLIENT_INSTRUCTIONS,
         "tools": TOOL_USAGE_GUIDE,
         "tool_call_endpoint": "POST /tools/call",
+        "remote_mcp_endpoint": "GET/POST /mcp",
         "auth_header": "Authorization: Bearer <MCP_AUTH_TOKEN>",
     }
+
+
+app.mount("/mcp", remote_mcp.streamable_http_app())
