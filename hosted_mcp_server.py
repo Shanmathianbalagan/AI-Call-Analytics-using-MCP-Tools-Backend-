@@ -1,5 +1,6 @@
 import os
 import secrets
+from contextlib import asynccontextmanager
 from typing import Any
 
 import mysql.connector
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 from mysql_mcp_server import (
@@ -26,21 +28,14 @@ from mysql_mcp_server import (
 load_dotenv()
 
 MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "").strip()
-
-app = FastAPI(
-    title="Hosted MCP Server",
-    description=(
-        "Authenticated HTTP wrapper around the existing MySQL-backed MCP "
-        "tools. Local Claude Desktop stdio MCP mode remains in "
-        "mysql_mcp_server.py; this app is for hosted/server access."
-    ),
-    version="1.0.0",
-)
-
-bearer_scheme = HTTPBearer(
-    scheme_name="MCP Bearer Token",
-    description="Use the Render MCP_AUTH_TOKEN value as a Bearer token.",
-)
+REMOTE_MCP_ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "REMOTE_MCP_ALLOWED_HOSTS",
+        "ai-call-analytics-mcp.onrender.com,localhost,127.0.0.1",
+    ).split(",")
+    if host.strip()
+]
 
 remote_mcp = FastMCP(
     "Hosted Call Analytics MCP",
@@ -52,6 +47,41 @@ remote_mcp = FastMCP(
     streamable_http_path="/",
     stateless_http=True,
     json_response=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=REMOTE_MCP_ALLOWED_HOSTS,
+        allowed_origins=[
+            "https://claude.ai",
+            "https://www.claude.ai",
+            "https://ai-call-analytics-mcp.onrender.com",
+        ],
+    ),
+)
+
+remote_mcp_app = remote_mcp.streamable_http_app()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Start the mounted MCP streamable HTTP session manager."""
+
+    async with remote_mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(
+    title="Hosted MCP Server",
+    description=(
+        "Authenticated HTTP wrapper around the existing MySQL-backed MCP "
+        "tools. Local Claude Desktop stdio MCP mode remains in "
+        "mysql_mcp_server.py; this app is for hosted/server access."
+    ),
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+bearer_scheme = HTTPBearer(
+    scheme_name="MCP Bearer Token",
+    description="Use the Render MCP_AUTH_TOKEN value as a Bearer token.",
 )
 
 
@@ -657,4 +687,4 @@ def get_ai_client_instructions(
     }
 
 
-app.mount("/mcp", remote_mcp.streamable_http_app())
+app.mount("/mcp", remote_mcp_app)
